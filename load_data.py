@@ -31,10 +31,10 @@ def prepare_line(line):
     if not t_stamp.endswith('+00:00'):
         raise AssertionError("timezone aware timestamp detected! {}".format(record))
     t_stamp = datetime.datetime.strptime(t_stamp[:-6], "%Y-%m-%dT%H:%M:%S").strftime(
-        "%Y-%m-%dT%H:%M:%S"
+        "%Y-%m-%dT%H:%M:%SZ"
     )
-    # record["@timestamp"] = time.mktime(t_stamp.timetuple())
-    record["@timestamp"] = t_stamp
+    # record["timestamp"] = time.mktime(t_stamp.timetuple())
+    record["timestamp"] = t_stamp
     return record
 
 
@@ -80,7 +80,7 @@ class Indexer(object):
                     "cache_generated": mapping('integer'),
                     "user_agent": mapping(analyzed=True),
                     "instance": mapping(),
-                    # "@timestamp": mapping('integer'),
+                    "timestamp": mapping('date'),
                     "cache_ttl": mapping('integer'),
                     "variant": mapping(),
                     "remote_addr": mapping('ip')
@@ -103,7 +103,7 @@ class Indexer(object):
         self._buffer = []
 
     def index(self, event):
-        date = event["@timestamp"][:10].replace("-", ".")
+        date = event["timestamp"][:10].replace("-", ".")
         if self.index_name != "logstash-" + date:
             self.flush_buffer()
             self.index_name = "logstash-" + date
