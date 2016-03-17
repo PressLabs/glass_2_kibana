@@ -45,7 +45,7 @@ class Indexer(object):
             "number_of_shards": 1,
             "number_of_replicas": 0,
             "index.codec": "best_compression",
-            "refresh_interval": "60s",
+            "refresh_interval": "15s",
         }
         self.client = es.ElasticSearch(urls=es_urls)
         self.index_name = None
