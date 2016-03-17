@@ -40,14 +40,14 @@ def prepare_line(line):
 
 class Indexer(object):
     BATCH_SIZE = 100
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, es_urls=None):
         self.settings = settings or {
             "number_of_shards": 1,
             "number_of_replicas": 0,
             "index.codec": "best_compression",
             "refresh_interval": "60s",
         }
-        self.client = es.ElasticSearch(urls=["http://localhost:9200"])
+        self.client = es.ElasticSearch(urls=es_urls)
         self.index_name = None
         self._buffer = []
 
@@ -131,8 +131,8 @@ class FileReader(object):
             time.sleep(1)
 
 
-def main():
-    indexer = Indexer()
+def main(args):
+    indexer = Indexer(es_urls=args.es_urls)
     data = FileReader("/var/lib/glass/access.log")
     for line in data:
         try:
@@ -146,4 +146,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="push glass logs to elasticsearch")
+    parser.add_argument('--es-url', dest='es_urls', nargs='+', type=str)
+    args = parser.parse_args()
+    main(args)
