@@ -27,11 +27,11 @@ def mapping(es_type="string", analyzed=False):
 
 def prepare_line(line):
     record = json.loads(line)
-    t_stamp = record.pop('time')
+    t_stamp = record['time']
     if not t_stamp.endswith('+00:00'):
         raise AssertionError("timezone aware timestamp detected! {}".format(record))
     t_stamp = datetime.datetime.strptime(t_stamp[:-6], "%Y-%m-%dT%H:%M:%S")
-    record["timestamp"] = int(time.mktime(t_stamp.timetuple())) * 1000
+    record["time"] = int(time.mktime(t_stamp.timetuple())) * 1000
     record["index_name"] = t_stamp.strftime("%Y.%m.%d")
     return record
 
@@ -78,7 +78,7 @@ class Indexer(object):
                     "cache_generated": mapping('integer'),
                     "user_agent": mapping(analyzed=True),
                     "instance": mapping(),
-                    "timestamp": mapping('date'),
+                    "time": mapping('date'),
                     "cache_ttl": mapping('integer'),
                     "variant": mapping(),
                     "remote_addr": mapping('ip')
