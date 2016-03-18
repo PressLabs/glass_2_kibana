@@ -50,18 +50,10 @@ class Indexer(object):
         self._buffer = []
 
     def create_index(self):
-        try:
-            self.client.delete_index(self.index_name)
-        except:
-            pass
         self.client.create_index(self.index_name, self.settings)
         _mapping = {
             "logs": {
                 "properties": {
-                    # "status": mapping(),
-                    # "time":  {"type": "integer"},
-                    # "location":  mapping(),
-                    # "desc":  mapping(),
                     "bytes_sent": mapping('integer'),
                     "request_time": mapping('float'),
                     "request_id": mapping(),
@@ -88,8 +80,6 @@ class Indexer(object):
                 # }
             }
         }
-        # from pprint import pprint
-        # pprint(_mapping)
         self.client.put_mapping(
             self.index_name, "logs", _mapping)
         return self
