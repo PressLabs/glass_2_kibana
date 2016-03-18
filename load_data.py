@@ -50,7 +50,11 @@ class Indexer(object):
         self._buffer = []
 
     def create_index(self):
-        self.client.create_index(self.index_name, self.settings)
+        try:
+            self.client.create_index(self.index_name, self.settings)
+        except:
+            # TODO: check for index esistance instead
+            pass
         _mapping = {
             "logs": {
                 "properties": {
