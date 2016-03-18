@@ -108,14 +108,19 @@ class FileReader(object):
 
     def __iter__(self):
         while True:
-            with open(self.f_name) as access_log:
-                inode = os.fstat(access_log.fileno()).st_ino
-                if inode == self.inode:
-                    time.sleep(1)
-                    continue
-                self.inode = inode
-                for line in access_log:
-                    yield line
+            try:
+                with open(self.f_name) as access_log:
+                    inode = os.fstat(access_log.fileno()).st_ino
+                    if inode == self.inode:
+                        time.sleep(1)
+                        continue
+                    self.inode = inode
+                    print "reading from", inode
+                    for line in access_log:
+                        yield line
+            except IOError as err:
+                if err.strerror != 'No such file or directory':
+                    raise
             time.sleep(1)
 
 
