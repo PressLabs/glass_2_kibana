@@ -31,7 +31,7 @@ def prepare_line(line):
     if not t_stamp.endswith('+00:00'):
         raise AssertionError("timezone aware timestamp detected! {}".format(record))
     t_stamp = datetime.datetime.strptime(t_stamp[:-6], "%Y-%m-%dT%H:%M:%S")
-    record["time"] = int(time.mktime(t_stamp.timetuple())) * 1000
+    record["time"] = t_stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     record["index_name"] = t_stamp.strftime("%Y.%m.%d")
     return record
 
