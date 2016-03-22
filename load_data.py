@@ -68,41 +68,40 @@ class Indexer(object):
     def create_index(self):
         try:
             self.client.create_index(self.index_name, self.settings)
+            _mapping = {
+                "logs": {
+                    "properties": {
+                        "bytes_sent": mapping('integer'),
+                        "request_time": mapping('float'),
+                        "request_id": mapping(),
+                        "host": mapping(analyzed=True),
+                        "request_type": mapping(),
+                        "scheme": mapping(),
+                        "request_uri": mapping(analyzed=True),
+                        "cache_status": mapping(),
+                        "cache_key": mapping(),
+                        "request_length": mapping('integer'),
+                        "instance_ref": mapping(),
+                        "status": mapping('integer'),
+                        "request_method": mapping(),
+                        "cache_generated": mapping('integer'),
+                        "user_agent": mapping(analyzed=True),
+                        "instance": mapping(),
+                        "time": mapping('date'),
+                        "cache_ttl": mapping('integer'),
+                        "variant": mapping(),
+                        "remote_addr": mapping('ip'),
+                    },
+                    # 'source': {
+                    #     'excludes': []
+                    # }
+                }
+            }
+            self.client.put_mapping(
+                self.index_name, "logs", _mapping)
         except:
             # TODO: check for index existance instead
             pass
-        _mapping = {
-            "logs": {
-                "properties": {
-                    "bytes_sent": mapping('integer'),
-                    "request_time": mapping('float'),
-                    "request_id": mapping(),
-                    "host": mapping(analyzed=True),
-                    "request_type": mapping(),
-                    "scheme": mapping(),
-                    "request_uri": mapping(analyzed=True),
-                    "cache_status": mapping(),
-                    "cache_key": mapping(),
-                    "request_length": mapping('integer'),
-                    "instance_ref": mapping(),
-                    "status": mapping('integer'),
-                    "request_method": mapping(),
-                    "cache_generated": mapping('integer'),
-                    "user_agent": mapping(analyzed=True),
-                    "instance": mapping(),
-                    "time": mapping('date'),
-                    "cache_ttl": mapping('integer'),
-                    "variant": mapping(),
-                    "remote_addr": mapping('ip'),
-                    "fe": mapping(),
-                },
-                # 'source': {
-                #     'excludes': []
-                # }
-            }
-        }
-        self.client.put_mapping(
-            self.index_name, "logs", _mapping)
         return self
 
     def flush_buffer(self):
