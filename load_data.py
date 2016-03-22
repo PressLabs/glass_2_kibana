@@ -21,12 +21,12 @@ def mapping(es_type="string", analyzed=False):
         # "fielddata": {
         #     "format": "disabled"
         # },
-        "fields": {
-            "raw": {
-                "type": es_type,
-                "index": "not_analyzed",
-            }
-        }
+        # "fields": {
+        #     "raw": {
+        #         "type": es_type,
+        #         "index": "not_analyzed",
+        #     }
+        # }
     }
     if analyzed is False:
         schema["index"] = "not_analyzed"
@@ -57,6 +57,7 @@ class Indexer(object):
         self.index_name = None
         self._buffer = []
         self._event_index = 0
+        # self._created = set([])
 
     def _reset_id_prefix(self):
         """generate and set prefix for all ids"""
@@ -65,12 +66,14 @@ class Indexer(object):
         time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
         self._id_prefix = machine_prefix + time_prefix
 
-    def create_index(self):
+    def create_index(self, index_name):
         try:
-            self.client.create_index(self.index_name, self.settings)
+            # self.client.delete_index(index_name)
+            self.client.create_index(index_name, self.settings)
             _mapping = {
                 "logs": {
                     "properties": {
+                        "etag": mapping(),
                         "bytes_sent": mapping('integer'),
                         "request_time": mapping('float'),
                         "request_id": mapping(),
@@ -92,22 +95,21 @@ class Indexer(object):
                         "variant": mapping(),
                         "remote_addr": mapping('ip'),
                     },
-                    # 'source': {
-                    #     'excludes': []
-                    # }
                 }
             }
             self.client.put_mapping(
-                self.index_name, "logs", _mapping)
+                index_name, "logs", _mapping)
         except:
             # TODO: check for index existance instead
             pass
+        # self._created.add(index_name)
         return self
 
     def flush_buffer(self):
         if len(self._buffer) == 0:
             return
         # import ipdb; ipdb.set_trace()
+        # assert self.index_name in self._created
         self.client.bulk(
             (self.client.index_op(doc, id=doc.pop('_id'))
              for doc in self._buffer),
@@ -116,12 +118,13 @@ class Indexer(object):
         self._buffer = []
 
     def index(self, event):
-        date = event.pop("index_name")
-        if self.index_name != "logstash-" + date:
+        event_index_name = "logstash-" + event.pop("index_name")
+        if self.index_name != event_index_name:
+            # switch to next index
             self.flush_buffer()
-            self.index_name = "logstash-" + date
+            self.index_name = event_index_name
             self._reset_id_prefix()
-            self.create_index()
+            self.create_index(self.index_name)
         event['_id'] = self._id_prefix + '{:06x}'.format(self._event_index)
         self._event_index += 1
         self._buffer.append(event)
