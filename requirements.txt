@@ -1,0 +1,4 @@
+pyelasticsearch
+chardet
+ipdb
+supervisor
