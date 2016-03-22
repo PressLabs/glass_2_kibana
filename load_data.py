@@ -57,11 +57,13 @@ class Indexer(object):
         self.index_name = None
         self._buffer = []
         self._event_index = 0
+        self._fe = None
         # self._created = set([])
 
     def _reset_id_prefix(self):
         """generate and set prefix for all ids"""
         machine_prefix = base64.b64encode(small_digest(HOST))[:-1]
+        self._fe = machine_prefix
         now = datetime.datetime.now()
         time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
         self._id_prefix = machine_prefix + time_prefix
@@ -94,6 +96,7 @@ class Indexer(object):
                         "cache_ttl": mapping('integer'),
                         "variant": mapping(),
                         "remote_addr": mapping('ip'),
+                        "fe": mapping(),
                     },
                 }
             }
@@ -125,6 +128,7 @@ class Indexer(object):
             self.index_name = event_index_name
             self._reset_id_prefix()
             self.create_index(self.index_name)
+        event['fe'] = self._fe
         event['_id'] = self._id_prefix + '{:06x}'.format(self._event_index)
         self._event_index += 1
         self._buffer.append(event)
