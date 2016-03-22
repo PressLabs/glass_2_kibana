@@ -1,10 +1,18 @@
+import base64
 import datetime
 import json
 import time
 import os
+import platform
+import hashlib
+import itertools
 
 import chardet
 import pyelasticsearch as es
+
+
+HOST = platform.node().split('.', 1)[0]
+
 
 
 def mapping(es_type="string", analyzed=False):
@@ -37,7 +45,7 @@ def prepare_line(line):
 
 
 class Indexer(object):
-    BATCH_SIZE = 100
+    BATCH_SIZE = 50
     def __init__(self, settings=None, es_urls=None):
         self.settings = settings or {
             "number_of_shards": 1,
@@ -48,12 +56,20 @@ class Indexer(object):
         self.client = es.ElasticSearch(urls=es_urls)
         self.index_name = None
         self._buffer = []
+        self._event_index = 0
+
+    def _reset_id_prefix(self):
+        """generate and set prefix for all ids"""
+        machine_prefix = base64.b64encode(small_digest(HOST))[:-1]
+        now = datetime.datetime.now()
+        time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
+        self._id_prefix = machine_prefix + time_prefix
 
     def create_index(self):
         try:
             self.client.create_index(self.index_name, self.settings)
         except:
-            # TODO: check for index esistance instead
+            # TODO: check for index existance instead
             pass
         _mapping = {
             "logs": {
@@ -77,7 +93,8 @@ class Indexer(object):
                     "time": mapping('date'),
                     "cache_ttl": mapping('integer'),
                     "variant": mapping(),
-                    "remote_addr": mapping('ip')
+                    "remote_addr": mapping('ip'),
+                    "fe": mapping(),
                 },
                 # 'source': {
                 #     'excludes': []
@@ -91,7 +108,12 @@ class Indexer(object):
     def flush_buffer(self):
         if len(self._buffer) == 0:
             return
-        self.client.bulk_index(self.index_name, "logs", self._buffer)
+        # import ipdb; ipdb.set_trace()
+        self.client.bulk(
+            (self.client.index_op(doc, id=doc.pop('_id'))
+             for doc in self._buffer),
+            index=self.index_name,
+            doc_type="logs")
         self._buffer = []
 
     def index(self, event):
@@ -99,10 +121,36 @@ class Indexer(object):
         if self.index_name != "logstash-" + date:
             self.flush_buffer()
             self.index_name = "logstash-" + date
+            self._reset_id_prefix()
             self.create_index()
+        event['_id'] = self._id_prefix + '{:06x}'.format(self._event_index)
+        self._event_index += 1
         self._buffer.append(event)
         if len(self._buffer) >= self.BATCH_SIZE:
             self.flush_buffer()
+
+
+def partitions(name, length):
+    for i in xrange(0, len(name), length):
+        yield [ord(char) for char in name[i:i+length]]
+
+
+def xor(part1, part2):
+    ret = []
+    for (c1, c2) in itertools.izip_longest(part1, part2, fillvalue=0):
+        ret.append(c1 ^ c2)
+    return ret
+
+
+def small_digest(data, length=3):
+    """Get a short digest by xoring together slices of the md5 of data
+
+    Args:
+        data (string): The data
+        length (number): The length in bytes of the resulting digest
+    """
+    digest = hashlib.md5(data).digest()
+    return "".join(chr(byte) for byte in reduce(xor, partitions(digest, length)))
 
 
 class FileReader(object):
