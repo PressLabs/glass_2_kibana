@@ -6,6 +6,7 @@ import os
 import platform
 import hashlib
 import itertools
+import logging
 
 import chardet
 import pyelasticsearch as es
@@ -63,7 +64,7 @@ def prepare_line(line):
 
 
 class Indexer(object):
-    BATCH_SIZE = 5
+    BATCH_SIZE = 2000
     def __init__(self, settings=None, es_urls=None):
         self.settings = settings or {
             "number_of_shards": 1,
@@ -178,22 +179,28 @@ def small_digest(data, length=3):
 
 
 class FileReader(object):
-    def __init__(self, f_name):
+    def __init__(self, f_name, idle_callback):
         self.f_name = f_name
         self.inode = None
+        self.idle_callback = idle_callback
 
     def __iter__(self):
         while True:
             try:
                 with open(self.f_name) as access_log:
-                    inode = os.fstat(access_log.fileno()).st_ino
-                    if inode == self.inode:
-                        time.sleep(1)
-                        continue
-                    self.inode = inode
-                    print "reading from", inode
-                    for line in access_log:
-                        yield line
+                    self.inode = os.fstat(access_log.fileno()).st_ino
+                    logging.info("processing file %d", self.inode)
+                    file_switched = False
+                    while not file_switched:
+                        line = access_log.readline()
+                        if line == "":
+                            if os.stat(self.f_name).st_ino != self.inode:
+                                file_switched = True
+                            else:
+                                self.idle_callback()
+                                time.sleep(1)
+                        else:
+                            yield line
             except IOError as err:
                 if err.strerror != 'No such file or directory':
                     raise
@@ -202,7 +209,8 @@ class FileReader(object):
 
 def main(args):
     indexer = Indexer(es_urls=args.es_urls)
-    data = FileReader("/var/lib/glass/access.log")
+    data = FileReader("/var/lib/glass/access.log",
+                      idle_callback=indexer.flush_buffer)
     for line in data:
         try:
             line = unicode(line, 'utf-8')
@@ -216,6 +224,13 @@ def main(args):
 
 if __name__ == '__main__':
     import argparse
+    logging_options = dict(
+        format="%(asctime)s %(levelname)s %(message)s",
+        level=logging.INFO
+    )
+    logging.basicConfig(**logging_options)
+    logging.getLogger("elasticsearch.trace").setLevel(logging.WARN)
+    logging.getLogger("elasticsearch").setLevel(logging.WARN)
     parser = argparse.ArgumentParser(description="push glass logs to elasticsearch")
     parser.add_argument('--es-url', dest='es_urls', nargs='+', type=str)
     args = parser.parse_args()
