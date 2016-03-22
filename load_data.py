@@ -13,6 +13,24 @@ import pyelasticsearch as es
 
 HOST = platform.node().split('.', 1)[0]
 
+# Useful for debugging!
+# These are the values of the FE prefixes:
+#
+# 8Ov fe3-ap-sg-geo1
+# a3T fe1-group4
+# BQ7 fe4-group2
+# E7p fe1-eu-central-geo1
+# EbD fe1-us-east-geo1
+# G90 fe4-test1
+# Iup fe1-eu-west-geo1
+# Jlg fe3-us-west-geo1
+# maF fe4-group3
+# omT fe1-ap-jp-geo1
+# oSw fe5-group3
+# RWZ fe2-test1
+# xn6 fe5-group2
+# XQm fe1-test1
+# ziP fe1-ap-au-geo1
 
 
 def mapping(es_type="string", analyzed=False):
@@ -45,7 +63,7 @@ def prepare_line(line):
 
 
 class Indexer(object):
-    BATCH_SIZE = 50
+    BATCH_SIZE = 5
     def __init__(self, settings=None, es_urls=None):
         self.settings = settings or {
             "number_of_shards": 1,
