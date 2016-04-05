@@ -14,41 +14,15 @@ import pyelasticsearch as es
 
 HOST = platform.node().split('.', 1)[0]
 
-# Useful for debugging!
-# These are the values of the FE prefixes:
-#
-# 8Ov fe3-ap-sg-geo1
-# a3T fe1-group4
-# BQ7 fe4-group2
-# E7p fe1-eu-central-geo1
-# EbD fe1-us-east-geo1
-# G90 fe4-test1
-# Iup fe1-eu-west-geo1
-# Jlg fe3-us-west-geo1
-# maF fe4-group3
-# omT fe1-ap-jp-geo1
-# oSw fe5-group3
-# RWZ fe2-test1
-# xn6 fe5-group2
-# XQm fe1-test1
-# ziP fe1-ap-au-geo1
 
-
-def mapping(es_type="string", analyzed=False):
+def mapping(es_type="string", analyzed=False, analyzer=None, index_name=None):
     schema = {
         "type": es_type,
-        # "fielddata": {
-        #     "format": "disabled"
-        # },
-        # "fields": {
-        #     "raw": {
-        #         "type": es_type,
-        #         "index": "not_analyzed",
-        #     }
-        # }
     }
     if analyzed is False:
         schema["index"] = "not_analyzed"
+    elif analyzer is not None:
+        schema['analyzer'] = analyzer
     return schema
 
 
@@ -60,6 +34,7 @@ def prepare_line(line):
     t_stamp = datetime.datetime.strptime(t_stamp[:-6], "%Y-%m-%dT%H:%M:%S")
     record["time"] = t_stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     record["index_name"] = t_stamp.strftime("%Y.%m.%d")
+    record['uri'] = record.pop('request_uri')
     return record
 
 
@@ -71,6 +46,20 @@ class Indexer(object):
             "number_of_replicas": 0,
             "index.codec": "best_compression",
             "refresh_interval": "15s",
+            "analysis": {
+                "tokenizer": {
+                    "url_tokenizer": {
+                        "type": "pattern",
+                        "pattern": "[/?=;&]"
+                    },
+                },
+                "analyzer": {
+                    "custom_url": {
+                        "type": "custom",
+                        "tokenizer": "url_tokenizer",
+                    }
+                }
+            }
         }
         self.client = es.ElasticSearch(urls=es_urls)
         self.index_name = None
@@ -98,10 +87,13 @@ class Indexer(object):
                         "bytes_sent": mapping('integer'),
                         "request_time": mapping('float'),
                         "request_id": mapping(),
-                        "host": mapping(analyzed=True),
+                        "host": mapping(),
                         "request_type": mapping(),
                         "scheme": mapping(),
-                        "request_uri": mapping(analyzed=True),
+                        "uri": mapping(
+                            analyzed=True,
+                            analyzer='custom_url',
+                        ),
                         "cache_status": mapping(),
                         "cache_key": mapping(),
                         "request_length": mapping('integer'),
@@ -125,6 +117,7 @@ class Indexer(object):
             # TODO: check for index existance instead
             pass
         # self._created.add(index_name)
+        # import sys; sys.exit(0)
         return self
 
     def flush_buffer(self):
