@@ -41,7 +41,7 @@ def prepare_line(line):
 
 class Indexer(object):
     BATCH_SIZE = 2000
-    def __init__(self, settings=None, es_urls=None):
+    def __init__(self, settings=None, es_urls=None, development=False):
         self.settings = settings or {
             "number_of_shards": 1,
             "number_of_replicas": 0,
@@ -67,6 +67,7 @@ class Indexer(object):
         self._buffer = []
         self._event_index = 0
         self._fe = None
+        self.development = development
         # self._created = set([])
 
     def _reset_id_prefix(self):
@@ -77,13 +78,16 @@ class Indexer(object):
         time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
         self._id_prefix = machine_prefix + time_prefix
 
-    def create_index(self, index_name):
+    def _delete_index(self, index_name):
         try:
-            try:
-                self.client.delete_index(index_name)
-                print "deleted"
-            except:
-                pass
+            self.client.delete_index(index_name)
+        except:
+            pass
+
+    def create_index(self, index_name):
+        if self.development:
+            self._delete_index(index_name)
+        try:
             self.client.create_index(index_name, self.settings)
             _mapping = {
                 "logs": {
@@ -233,6 +237,7 @@ def main(args):
                       idle_callback=indexer.flush_buffer)
     if args.development is True:
         data.NOAPPEND = True
+        indexer.development = True
     for line in data:
         try:
             line = unicode(line, 'utf-8')
