@@ -71,7 +71,7 @@ class Indexer(object):
     def _reset_id_prefix(self):
         """generate and set prefix for all ids"""
         machine_prefix = base64.b64encode(small_digest(HOST))[:-1]
-        self._fe = machine_prefix
+        self._fe = HOST
         now = datetime.datetime.now()
         time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
         self._id_prefix = machine_prefix + time_prefix
