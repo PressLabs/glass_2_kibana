@@ -1,12 +1,13 @@
 import base64
 import datetime
-import json
-import time
-import os
-import platform
 import hashlib
 import itertools
+import json
 import logging
+import os
+import platform
+import signal
+import time
 
 import chardet
 import pyelasticsearch as es
@@ -70,7 +71,7 @@ class Indexer(object):
 
     def _reset_id_prefix(self):
         """generate and set prefix for all ids"""
-        machine_prefix = base64.b64encode(small_digest(HOST))[:-1]
+        machine_prefix = base64.b64encode(small_digest(HOST, 1))[:-2]
         self._fe = HOST
         now = datetime.datetime.now()
         time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
@@ -78,7 +79,11 @@ class Indexer(object):
 
     def create_index(self, index_name):
         try:
-            # self.client.delete_index(index_name)
+            try:
+                self.client.delete_index(index_name)
+                print "deleted"
+            except:
+                pass
             self.client.create_index(index_name, self.settings)
             _mapping = {
                 "logs": {
@@ -172,10 +177,25 @@ def small_digest(data, length=3):
 
 
 class FileReader(object):
+    EXIT = False
+    NOAPPEND = False
+
     def __init__(self, f_name, idle_callback):
         self.f_name = f_name
         self.inode = None
         self.idle_callback = idle_callback
+        self.register_sighup_handler()
+
+    @classmethod
+    def register_sighup_handler(cls):
+        """Sets up a signal handler for SIGHUP.
+        When SIGHUP is recieved, this should finish the current file then exit.
+        Supervisord should restart the program so we start processing the next
+        file with the latest and greatest code.
+        """
+        def handler(signo, _frame): # pylint: disable=unused-argument
+            cls.EXIT = True
+        signal.signal(signal.SIGHUP, handler)
 
     def __iter__(self):
         while True:
@@ -188,8 +208,15 @@ class FileReader(object):
                         line = access_log.readline()
                         if line == "":
                             if os.stat(self.f_name).st_ino != self.inode:
+                                if self.EXIT:
+                                    # stop reading and let the program exit normally
+                                    return
                                 file_switched = True
                             else:
+                                if self.NOAPPEND:
+                                    # we're in development mode, just exit now
+                                    return
+                                # wait for more data to be written to the file
                                 self.idle_callback()
                                 time.sleep(1)
                         else:
@@ -204,6 +231,8 @@ def main(args):
     indexer = Indexer(es_urls=args.es_urls)
     data = FileReader("/var/lib/glass/access.log",
                       idle_callback=indexer.flush_buffer)
+    if args.development is True:
+        data.NOAPPEND = True
     for line in data:
         try:
             line = unicode(line, 'utf-8')
@@ -226,5 +255,6 @@ if __name__ == '__main__':
     logging.getLogger("elasticsearch").setLevel(logging.WARN)
     parser = argparse.ArgumentParser(description="push glass logs to elasticsearch")
     parser.add_argument('--es-url', dest='es_urls', nargs='+', type=str)
+    parser.add_argument('--development', dest='development', action='store_true')
     args = parser.parse_args()
     main(args)
