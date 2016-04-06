@@ -180,7 +180,10 @@ class Indexer(object):
     def create_index(self, index_name):
         if self.development:
             self._delete_index(index_name)
-        self.client.create_index(index_name)
+        try:
+            self.client.create_index(index_name)
+        except:
+            pass
         return self
 
     def flush_buffer(self):
