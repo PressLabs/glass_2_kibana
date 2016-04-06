@@ -104,6 +104,8 @@ class Indexer(object):
                     "_meta": {
                         "schema_version": VERSION,
                     },
+                    # ignore fields if not in mapping
+                    "dynamic": "false",
                     "properties": {
                         "etag": mapping(),
                         "bytes_sent": mapping('integer'),
