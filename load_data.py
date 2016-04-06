@@ -38,7 +38,9 @@ def prepare_line(line):
     t_stamp = datetime.datetime.strptime(t_stamp[:-6], "%Y-%m-%dT%H:%M:%S")
     record["time"] = t_stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     record["index_name"] = t_stamp.strftime("%Y.%m.%d")
-    record['uri'] = record.pop('request_uri')
+    uri = record.pop('request_uri', None)
+    if uri is not None:
+        record['uri'] = uri
     return record
 
 
