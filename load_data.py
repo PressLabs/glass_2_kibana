@@ -8,15 +8,18 @@ import os
 import platform
 import signal
 import time
+import urlparse
 
 import chardet
 import pyelasticsearch as es
+import requests
 
 
+VERSION = '20160406-0'
 HOST = platform.node().split('.', 1)[0]
 
 
-def mapping(es_type="string", analyzed=False, analyzer=None, index_name=None):
+def mapping(es_type="string", analyzed=False, analyzer=None):
     schema = {
         "type": es_type,
     }
@@ -39,58 +42,68 @@ def prepare_line(line):
     return record
 
 
+class RequestError(Exception):
+    def __init__(self, message, status_code):
+        self.status_code = status_code
+        super(RequestError, self).__init__(message)
+
+
 class Indexer(object):
     BATCH_SIZE = 2000
-    def __init__(self, settings=None, es_urls=None, development=False):
-        self.settings = settings or {
-            "number_of_shards": 1,
-            "number_of_replicas": 0,
-            "index.codec": "best_compression",
-            "refresh_interval": "15s",
-            "analysis": {
-                "tokenizer": {
-                    "url_tokenizer": {
-                        "type": "pattern",
-                        "pattern": "[/?=;&]"
-                    },
-                },
-                "analyzer": {
-                    "custom_url": {
-                        "type": "custom",
-                        "tokenizer": "url_tokenizer",
-                    }
-                }
-            }
-        }
+    def __init__(self, es_urls=None, development=False):
         self.client = es.ElasticSearch(urls=es_urls)
+        self.es_urls = es_urls
         self.index_name = None
         self._buffer = []
         self._event_index = 0
         self._fe = None
         self.development = development
-        # self._created = set([])
+        self.create_template()
 
-    def _reset_id_prefix(self):
-        """generate and set prefix for all ids"""
-        machine_prefix = base64.b64encode(small_digest(HOST, 1))[:-2]
-        self._fe = HOST
-        now = datetime.datetime.now()
-        time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
-        self._id_prefix = machine_prefix + time_prefix
-
-    def _delete_index(self, index_name):
+    def _get_template_version(self):
         try:
-            self.client.delete_index(index_name)
-        except:
-            pass
+            template = self._request('get', '_template/logstash?pretty').json()
+        except RequestError as err:
+            if err.status_code == 404:
+                # if the template is missing it's ok
+                return
+            else:
+                raise
+        return template['logstash']['mappings']['logs']['_meta']['schema_version']
 
-    def create_index(self, index_name):
-        if self.development:
-            self._delete_index(index_name)
-        try:
-            self.client.create_index(index_name, self.settings)
-            _mapping = {
+    def create_template(self):
+        version = self._get_template_version()
+        if version and version > VERSION:
+            logging.error("Indexer version older than mapping version!")
+            return
+        url = '_template/logstash?pretty'
+        template = {
+            "template": "logstash-*",
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "index.codec": "best_compression",
+                "refresh_interval": "15s",
+                "analysis": {
+                    "tokenizer": {
+                        "url_tokenizer": {
+                            "type": "pattern",
+                            "pattern": "[/?=;&]"
+                        },
+                    },
+                    "analyzer": {
+                        "custom_url": {
+                            "type": "custom",
+                            "tokenizer": "url_tokenizer",
+                        }
+                    }
+                }
+            },
+            "mappings": {
                 "logs": {
+                    "_meta": {
+                        "schema_version": VERSION,
+                    },
                     "properties": {
                         "etag": mapping(),
                         "bytes_sent": mapping('integer'),
@@ -104,6 +117,7 @@ class Indexer(object):
                             analyzer='custom_url',
                         ),
                         "cache_status": mapping(),
+                        "cache_zone": mapping(),
                         "cache_key": mapping(),
                         "request_length": mapping('integer'),
                         "instance_ref": mapping(),
@@ -119,21 +133,57 @@ class Indexer(object):
                         "fe": mapping(),
                     },
                 }
-            }
-            self.client.put_mapping(
-                index_name, "logs", _mapping)
+            },
+        }
+        return self._request('put', url, template)
+
+    def _request(self, method, url, data=None):
+        method_func = getattr(requests, method.lower())
+        if url.startswith('/'):
+            url = url[1:]
+        if data is not None:
+            data = json.dumps(data)
+        for es_url in self.es_urls:
+            (scheme, host, _, _, _) = urlparse.urlsplit(es_url)
+            full_url = "{}://{}/{}".format(scheme or "http://", host, url)
+            try:
+                resp = method_func(full_url, data=data)
+                if resp.status_code == 200:
+                    return resp
+                else:
+                    raise RequestError(
+                        "Error: {} {} failed with status: {} response was:\n{}".format(
+                            method.upper(), url, resp.status_code, resp.content),
+                        status_code=resp.status_code)
+            except requests.ConnectionError as err:
+                logging.warning("could not connect to %s, trying next url")
+        else:
+            raise requests.ConnectionError("Failed to connect to any url: %r", self.es_urls)
+
+    def _reset_id_prefix(self):
+        """generate and set prefix for all ids"""
+        machine_prefix = base64.b64encode(small_digest(HOST, 1))[:-2]
+        self._fe = HOST
+        now = datetime.datetime.now()
+        time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
+        self._id_prefix = machine_prefix + time_prefix
+
+    def _delete_index(self, index_name):
+        try:
+            self.client.delete_index(index_name)
+            print 'deleted'
         except:
-            # TODO: check for index existance instead
             pass
-        # self._created.add(index_name)
-        # import sys; sys.exit(0)
+
+    def create_index(self, index_name):
+        if self.development:
+            self._delete_index(index_name)
+        self.client.create_index(index_name)
         return self
 
     def flush_buffer(self):
         if len(self._buffer) == 0:
             return
-        # import ipdb; ipdb.set_trace()
-        # assert self.index_name in self._created
         self.client.bulk(
             (self.client.index_op(doc, id=doc.pop('_id'))
              for doc in self._buffer),
@@ -253,7 +303,7 @@ if __name__ == '__main__':
     import argparse
     logging_options = dict(
         format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.INFO
+        level=logging.WARNING
     )
     logging.basicConfig(**logging_options)
     logging.getLogger("elasticsearch.trace").setLevel(logging.WARN)
