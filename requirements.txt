@@ -1,4 +1,4 @@
-pyelasticsearch
-chardet
-ipdb
-supervisor
+requests==2.9.1
+supervisor==3.2.3
+chardet==2.3.0
+pyelasticsearch==1.4
