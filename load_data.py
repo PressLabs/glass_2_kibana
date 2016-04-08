@@ -16,18 +16,17 @@ import pyelasticsearch as es
 import requests
 
 
-VERSION = '20160406-0'
+VERSION = '20160408-0'
 HOST = platform.node().split('.', 1)[0]
 
 
-def mapping(es_type="string", analyzed=False, analyzer=None):
+def mapping(es_type="string", analyzed=False, **kwargs):
     schema = {
         "type": es_type,
     }
     if analyzed is False:
         schema["index"] = "not_analyzed"
-    elif analyzer is not None:
-        schema['analyzer'] = analyzer
+    schema.update(kwargs)
     return schema
 
 
@@ -135,7 +134,7 @@ class Indexer(object):
                         "instance_ref": mapping(),
                         "status": mapping('integer'),
                         "request_method": mapping(),
-                        "cache_generated": mapping('integer'),
+                        "cache_generated": mapping('date', format='epoch_second'),
                         "user_agent": mapping(analyzed=True),
                         "instance": mapping(),
                         "time": mapping('date'),
@@ -143,6 +142,7 @@ class Indexer(object):
                         "variant": mapping(),
                         "remote_addr": mapping('ip'),
                         "fe": mapping(),
+                        "referer": mapping(),
                     },
                 }
             },
