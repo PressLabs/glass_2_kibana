@@ -32,7 +32,11 @@ def mapping(es_type="string", analyzed=False, analyzer=None):
 
 
 def prepare_line(line):
-    record = json.loads(line)
+    try:
+        record = json.loads(line)
+    except ValueError:
+        logging.error("got malformed line: %s", line)
+        return
     t_stamp = record['time']
     if not t_stamp.endswith('+00:00'):
         raise AssertionError("timezone aware timestamp detected! {}".format(record))
@@ -303,9 +307,9 @@ class FileReader(object):
             time.sleep(1)
 
 
-def main(args):
+def main_loop(args):
     indexer = Indexer(es_urls=args.es_urls)
-    data = FileReader("/var/lib/glass/access.log",
+    data = FileReader(args.input,
                       idle_callback=indexer.flush_buffer,
                       file_switch_callback=indexer.file_switched)
     if args.development is True:
@@ -318,21 +322,29 @@ def main(args):
             guess = chardet.detect(line)['encoding']
             line = unicode(line, guess)
         event = prepare_line(line)
-        indexer.index(event)
+        if event is not None:
+            indexer.index(event)
     indexer.flush_buffer()
 
 
-if __name__ == '__main__':
+def main():
     import argparse
+    parser = argparse.ArgumentParser(description="push glass logs to elasticsearch")
+    parser.add_argument('--es-url', dest='es_urls', nargs='+', type=str)
+    parser.add_argument('--input', dest='input', default='/var/lib/glass/access.log')
+    parser.add_argument('--development', dest='development', action='store_true')
+    args = parser.parse_args()
+
+    level = logging.DEBUG if args.development else logging.WARN
     logging_options = dict(
         format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.INFO
+        level=level
     )
     logging.basicConfig(**logging_options)
     logging.getLogger("elasticsearch.trace").setLevel(logging.WARN)
     logging.getLogger("elasticsearch").setLevel(logging.WARN)
-    parser = argparse.ArgumentParser(description="push glass logs to elasticsearch")
-    parser.add_argument('--es-url', dest='es_urls', nargs='+', type=str)
-    parser.add_argument('--development', dest='development', action='store_true')
-    args = parser.parse_args()
-    main(args)
+    main_loop(args)
+
+
+if __name__ == '__main__':
+    main()
