@@ -16,7 +16,7 @@ import pyelasticsearch as es
 import requests
 
 
-VERSION = '20160408-0'
+VERSION = '20160408-1'
 HOST = platform.node().split('.', 1)[0]
 
 
@@ -92,7 +92,7 @@ class Indexer(object):
                 "number_of_shards": 1,
                 "number_of_replicas": 0,
                 "index.codec": "best_compression",
-                "refresh_interval": "1s",
+                "refresh_interval": "10s",
                 "analysis": {
                     "tokenizer": {
                         "url_tokenizer": {
