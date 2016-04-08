@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import signal
+import string
 import time
 import urlparse
 
@@ -55,9 +56,12 @@ class Indexer(object):
     def __init__(self, es_urls=None, development=False):
         self.client = es.ElasticSearch(urls=es_urls)
         self.es_urls = es_urls
-        self.index_name = None
+        self._index_name = None
         self._buffer = []
         self._event_index = 0
+        self._id_suffix = None
+        self._id_prefix = None
+        self._reset_sequence = False
         self._fe = None
         self.development = development
         self.create_template()
@@ -85,7 +89,7 @@ class Indexer(object):
                 "number_of_shards": 1,
                 "number_of_replicas": 0,
                 "index.codec": "best_compression",
-                "refresh_interval": "15s",
+                "refresh_interval": "1s",
                 "analysis": {
                     "tokenizer": {
                         "url_tokenizer": {
@@ -164,13 +168,27 @@ class Indexer(object):
         else:
             raise requests.ConnectionError("Failed to connect to any url: %r", self.es_urls)
 
-    def _reset_id_prefix(self):
-        """generate and set prefix for all ids"""
-        machine_prefix = base64.b64encode(small_digest(HOST, 1))[:-2]
-        self._fe = HOST
-        now = datetime.datetime.now()
-        time_prefix = base64.b64encode("".join((chr(now.hour), chr(now.minute), chr(now.second))))
-        self._id_prefix = machine_prefix + time_prefix
+    def _reset_id(self, date_time_str):
+        """
+        Generate a starting sequence based on the hostname and seconds since midnight of the event
+        This means we should generate the same id's and it should be safe to re-process the same
+        log file several times and not duplicate events.
+
+        If we ever move away from one index per day this will cause collisions!
+
+        Read this for tips about choosing a performace-friendly id:
+        http://blog.mikemccandless.com/2014/05/choosing-fast-unique-identifier-uuid.html
+        """
+        machine_part = base64.b64encode(small_digest(HOST, 1)).rstrip('=')
+        dtime = datetime.datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M:%SZ")
+        day_start = datetime.datetime(dtime.year, dtime.month, dtime.day, tzinfo=dtime.tzinfo)
+        delta = int((dtime - day_start).total_seconds())
+        # delta can be at most 24 * 3600 which fist in 2 bytes
+        date_part = chr(delta >> 8) + chr(delta & 255)
+        date_part = base64.b64encode(date_part).rstrip('=')
+        self._id_suffix = machine_part
+        self._id_prefix = date_part
+        self._event_index = 0
 
     def _delete_index(self, index_name):
         try:
@@ -194,24 +212,34 @@ class Indexer(object):
         self.client.bulk(
             (self.client.index_op(doc, id=doc.pop('_id'))
              for doc in self._buffer),
-            index=self.index_name,
+            index=self._index_name,
             doc_type="logs")
         self._buffer = []
 
     def index(self, event):
         event_index_name = "logstash-" + event.pop("index_name")
-        if self.index_name != event_index_name:
+        assert event['time']
+        if self._index_name != event_index_name or self._reset_sequence:
             # switch to next index
+            self._reset_id(event['time'])
             self.flush_buffer()
-            self.index_name = event_index_name
-            self._reset_id_prefix()
-            self.create_index(self.index_name)
+            self._index_name = event_index_name
+            self._reset_sequence = False
+            self.create_index(self._index_name)
         event['fe'] = self._fe
-        event['_id'] = self._id_prefix + '{:06x}'.format(self._event_index)
+        event['_id'] = '{}{:08x}{}'.format(
+            self._id_prefix, self._event_index, self._id_suffix)
         self._event_index += 1
         self._buffer.append(event)
         if len(self._buffer) >= self.BATCH_SIZE:
             self.flush_buffer()
+
+    def file_switched(self):
+        """Flush buffer and reset indexing sequence
+        This ensures re-processing a log file is idempotent
+        """
+        self.flush_buffer()
+        self._reset_sequence = True
 
 
 def partitions(name, length):
@@ -238,25 +266,13 @@ def small_digest(data, length=3):
 
 
 class FileReader(object):
-    EXIT = False
     NOAPPEND = False
 
-    def __init__(self, f_name, idle_callback):
+    def __init__(self, f_name, idle_callback, file_switch_callback):
         self.f_name = f_name
         self.inode = None
         self.idle_callback = idle_callback
-        self.register_sighup_handler()
-
-    @classmethod
-    def register_sighup_handler(cls):
-        """Sets up a signal handler for SIGHUP.
-        When SIGHUP is recieved, this should finish the current file then exit.
-        Supervisord should restart the program so we start processing the next
-        file with the latest and greatest code.
-        """
-        def handler(signo, _frame): # pylint: disable=unused-argument
-            cls.EXIT = True
-        signal.signal(signal.SIGHUP, handler)
+        self.file_switch_callback = file_switch_callback
 
     def __iter__(self):
         while True:
@@ -269,10 +285,9 @@ class FileReader(object):
                         line = access_log.readline()
                         if line == "":
                             if os.stat(self.f_name).st_ino != self.inode:
-                                if self.EXIT:
-                                    # stop reading and let the program exit normally
-                                    return
                                 file_switched = True
+                                logging.debug("file switch")
+                                self.file_switch_callback()
                             else:
                                 if self.NOAPPEND:
                                     # we're in development mode, just exit now
@@ -291,7 +306,8 @@ class FileReader(object):
 def main(args):
     indexer = Indexer(es_urls=args.es_urls)
     data = FileReader("/var/lib/glass/access.log",
-                      idle_callback=indexer.flush_buffer)
+                      idle_callback=indexer.flush_buffer,
+                      file_switch_callback=indexer.file_switched)
     if args.development is True:
         data.NOAPPEND = True
         indexer.development = True
@@ -310,7 +326,7 @@ if __name__ == '__main__':
     import argparse
     logging_options = dict(
         format="%(asctime)s %(levelname)s %(message)s",
-        level=logging.WARNING
+        level=logging.INFO
     )
     logging.basicConfig(**logging_options)
     logging.getLogger("elasticsearch.trace").setLevel(logging.WARN)
