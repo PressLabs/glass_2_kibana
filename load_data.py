@@ -65,7 +65,7 @@ class Indexer(object):
         self._id_suffix = None
         self._id_prefix = None
         self._reset_sequence = False
-        self._fe = None
+        self._fe = HOST
         self.development = development
         self.create_template()
 
