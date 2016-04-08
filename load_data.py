@@ -187,8 +187,8 @@ class Indexer(object):
         dtime = datetime.datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M:%SZ")
         day_start = datetime.datetime(dtime.year, dtime.month, dtime.day, tzinfo=dtime.tzinfo)
         delta = int((dtime - day_start).total_seconds())
-        # delta can be at most 24 * 3600 which fist in 2 bytes
-        date_part = chr(delta >> 8) + chr(delta & 255)
+        # delta can be at most 24 * 3600 which fist in 3 bytes
+        date_part = chr((delta >> 16) & 255)+ chr((delta >> 8) & 255) + chr(delta & 255)
         date_part = base64.b64encode(date_part).rstrip('=')
         self._id_suffix = machine_part
         self._id_prefix = date_part
